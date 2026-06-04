@@ -183,7 +183,7 @@ async function fetchAccessories(outfitId, buttonElement) {
 
 // Generates the Lua script and copies it to the user's clipboard
 function copyAvatarScript(outfitId, buttonElement) {
-    const luaCode = `-- Local Avatar Changer Script (Manual Motor6D Attachment)
+    const luaCode = `-- Local Avatar Changer Script (Manual Motor6D & Asset Extraction)
 local targetOutfitId = ${outfitId}
 
 local Players = game:GetService("Players")
@@ -273,9 +273,8 @@ end
 
 local function clearAppearance(character)
 \tfor _, obj in ipairs(character:GetChildren()) do
-\t\tif obj:IsA("Accessory") or obj:IsA("Hat") or
-\t\t   obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") or
-\t\t   obj:IsA("CharacterMesh") or obj:IsA("BodyColors") then
+\t\tif obj:IsA("Accoutrement") or obj:IsA("Shirt") or obj:IsA("Pants") or 
+\t\t   obj:IsA("ShirtGraphic") or obj:IsA("CharacterMesh") or obj:IsA("BodyColors") then
 \t\t\tobj:Destroy()
 \t\tend
 \tend
@@ -297,17 +296,33 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \t\treturn game:GetObjects("rbxassetid://" .. tostring(assetId))
 \tend)
 \t
-\tif success and objects and objects[1] then
-\t\tlocal obj = objects[1]
-\t\t
-\t\tif obj:IsA("Accessory") or obj:IsA("Hat") then
-\t\t\tattachAccessory(character, obj)
-\t\telseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") then
-\t\t\tobj.Parent = character
-\t\telseif obj:IsA("Decal") and assetType == "Face" then
-\t\t\tlocal head = character:FindFirstChild("Head")
-\t\t\tif head then
-\t\t\t\tobj.Parent = head
+\tif success and objects then
+\t\tfor _, obj in ipairs(objects) do
+\t\t\t-- Using Accoutrement catches Accessories, Hats, and legacy Hair
+\t\t\tif obj:IsA("Accoutrement") then 
+\t\t\t\tattachAccessory(character, obj)
+\t\t\telseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") or obj:IsA("CharacterMesh") then
+\t\t\t\tobj.Parent = character
+\t\t\telseif assetType == "Face" then
+\t\t\t\t-- Dig through folders in case the Decal is hidden inside
+\t\t\t\tlocal decal = obj:IsA("Decal") and obj or obj:FindFirstChildWhichIsA("Decal", true)
+\t\t\t\tlocal head = character:FindFirstChild("Head")
+\t\t\t\tif head and decal then
+\t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
+\t\t\t\t\t\tif v:IsA("Decal") and v.Name == "face" then v:Destroy() end
+\t\t\t\t\tend
+\t\t\t\t\tdecal.Name = "face"
+\t\t\t\t\tdecal.Parent = head
+\t\t\t\tend
+\t\t\telseif assetType == "Head" then
+\t\t\t\tlocal mesh = obj:IsA("SpecialMesh") and obj or obj:FindFirstChildWhichIsA("SpecialMesh", true)
+\t\t\t\tlocal head = character:FindFirstChild("Head")
+\t\t\t\tif head and mesh then
+\t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
+\t\t\t\t\t\tif v:IsA("SpecialMesh") then v:Destroy() end
+\t\t\t\t\tend
+\t\t\t\t\tmesh.Parent = head
+\t\t\t\tend
 \t\t\tend
 \t\tend
 \tend
@@ -327,7 +342,7 @@ local function applyOutfit(outfitId)
 
 \tclearAppearance(character)
 \t
-\t-- FIXED: Using Color3 properties instead of BrickColor properties
+\t-- Apply Colors
 \tlocal bc = Instance.new("BodyColors")
 \tbc.HeadColor3 = description.HeadColor
 \tbc.LeftArmColor3 = description.LeftArmColor
@@ -337,29 +352,44 @@ local function applyOutfit(outfitId)
 \tbc.TorsoColor3 = description.TorsoColor
 \tbc.Parent = character
 
-\t-- Recreate Head
+\t-- Recreate Default Head Mesh
 \tlocal head = character:FindFirstChild("Head")
 \tif head then
 \t\tlocal mesh = Instance.new("SpecialMesh")
 \t\tmesh.MeshType = Enum.MeshType.Head
 \t\tmesh.Scale = Vector3.new(1.25, 1.25, 1.25)
 \t\tmesh.Parent = head
-\t\t
-\t\tif description.Face == 0 then
-\t\t\tlocal defaultFace = Instance.new("Decal")
-\t\t\tdefaultFace.Name = "face"
-\t\t\tdefaultFace.Texture = "rbxasset://textures/face.png"
-\t\t\tdefaultFace.Parent = head
-\t\tend
 \tend
 
 \t-- Load standard clothing
 \tloadAndApplyAsset(character, description.Shirt, "Shirt")
 \tloadAndApplyAsset(character, description.Pants, "Pants")
 \tloadAndApplyAsset(character, description.GraphicTShirt, "ShirtGraphic")
-\tloadAndApplyAsset(character, description.Face, "Face")
 \t
-\t-- Load & attach all accessories
+\t-- Load Custom Faces or Default
+\tif description.Face > 0 then
+\t\tloadAndApplyAsset(character, description.Face, "Face")
+\telseif head then
+\t\tlocal defaultFace = Instance.new("Decal")
+\t\tdefaultFace.Name = "face"
+\t\tdefaultFace.Texture = "rbxasset://textures/face.png"
+\t\tdefaultFace.Parent = head
+\tend
+
+\t-- Load Custom Heads
+\tif description.Head > 0 then
+\t\tloadAndApplyAsset(character, description.Head, "Head")
+\tend
+
+\t-- Load Body Bundles (Applies CharacterMeshes)
+\tlocal bodyParts = {"LeftArm", "RightArm", "LeftLeg", "RightLeg", "Torso"}
+\tfor _, partName in ipairs(bodyParts) do
+\t\tif description[partName] and description[partName] ~= 0 then
+\t\t\tloadAndApplyAsset(character, description[partName], "Body")
+\t\tend
+\tend
+\t
+\t-- Load & attach all accessories (Including Hair)
 \tlocal accessoryProps = {
 \t\t"HatAccessory", "HairAccessory", "FaceAccessory", "NeckAccessory",
 \t\t"ShouldersAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory"
