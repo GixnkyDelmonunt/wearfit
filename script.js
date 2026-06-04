@@ -1,8 +1,9 @@
 const USERS_API = "https://users.roproxy.com/v1/users/";
 const AVATAR_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/avatar?size=420x420&format=Png&isCircular=false&userIds=";
 const AVATAR_API = "https://avatar.roproxy.com/v1/";
-// New API to fetch 2D outfit images
-const OUTFIT_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/outfits?size=150x150&format=Png&isCircular=false&outfitIds=";
+
+// FIXED: The correct API path is 'users/outfits' and the parameter is 'userOutfitIds'
+const OUTFIT_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/outfits?size=150x150&format=Png&isCircular=false&userOutfitIds=";
 
 async function searchPlayer() {
     const userId = document.getElementById('userIdInput').value.trim();
@@ -66,7 +67,7 @@ async function fetchOutfits(userId) {
         // 4. BATCH REQUEST: Extract all Outfit IDs to get their thumbnails at the exact same time
         const outfitIds = outfits.map(outfit => outfit.id).join(',');
         
-        // Fetch all thumbnails in one single request to prevent rate limiting
+        // Fetch all thumbnails in one single request
         const thumbnailsRes = await fetch(OUTFIT_THUMBNAILS_API + outfitIds);
         const thumbnailsData = await thumbnailsRes.json();
 
