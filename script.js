@@ -3,6 +3,27 @@ const AVATAR_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/avatar?si
 const AVATAR_API = "https://avatar.roproxy.com/v1/";
 const OUTFIT_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/outfits?size=150x150&format=Png&isCircular=false&userOutfitIds=";
 
+// NEW: A robust helper function that automatically retries failed network requests
+async function fetchWithRetry(url, retries = 3, delay = 1000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await fetch(url);
+            if (response.ok) return response;
+            
+            // If we get rate limited (429), wait a bit longer before retrying
+            if (response.status === 429) {
+                await new Promise(res => setTimeout(res, delay * 2));
+                continue;
+            }
+        } catch (err) {
+            if (i === retries - 1) throw err; // Out of retries, throw the error
+        }
+        // Wait before trying again
+        await new Promise(res => setTimeout(res, delay));
+    }
+    throw new Error(`Failed to fetch after ${retries} attempts.`);
+}
+
 async function searchPlayer() {
     const userId = document.getElementById('userIdInput').value.trim();
     const statusText = document.getElementById('statusText');
@@ -16,17 +37,15 @@ async function searchPlayer() {
     outfitsContainer.innerHTML = "";
 
     try {
-        // 1. Fetch User Info
-        const userRes = await fetch(USERS_API + userId);
-        if (!userRes.ok) throw new Error("Player not found.");
+        // Fetch User Info with retry reliability
+        const userRes = await fetchWithRetry(USERS_API + userId);
         const userData = await userRes.json();
 
-        // 2. Fetch User Avatar Image
-        const thumbRes = await fetch(AVATAR_THUMBNAILS_API + userId);
+        // Fetch User Avatar Image with retry reliability
+        const thumbRes = await fetchWithRetry(AVATAR_THUMBNAILS_API + userId);
         const thumbData = await thumbRes.json();
         const avatarImageUrl = thumbData.data[0]?.imageUrl || "";
 
-        // Render Profile Card
         profileContainer.innerHTML = `
             <div class="profile-card">
                 <h2>${userData.displayName}</h2>
@@ -39,7 +58,7 @@ async function searchPlayer() {
         statusText.textContent = "";
 
     } catch (error) {
-        statusText.textContent = "Error: " + error.message;
+        statusText.textContent = "Error: Player not found or Proxy Connection dropped.";
     }
 }
 
@@ -47,7 +66,7 @@ async function fetchOutfits(userId) {
     const statusText = document.getElementById('statusText');
     const outfitsContainer = document.getElementById('outfitsContainer');
     
-    statusText.textContent = "Scanning for all outfits... (this might take a moment)";
+    statusText.textContent = "Connecting to Roblox servers...";
     outfitsContainer.innerHTML = "";
 
     try {
@@ -55,50 +74,49 @@ async function fetchOutfits(userId) {
         let page = 1;
         let isFetching = true;
 
-        // 3. PAGINATION: Loop through every page to bypass the default 25 limit
         while (isFetching) {
-            // isEditable=true & outfitType=Avatar ensures we ONLY get custom outfits, no bundles or heads
-            // itemsPerPage=50 grabs the maximum allowed per request to speed up the loop
-            const endpoint = AVATAR_API + `users/${userId}/outfits?page=${page}&itemsPerPage=50&isEditable=true&outfitType=Avatar`;
-            const outfitsRes = await fetch(endpoint);
+            statusText.textContent = `Scanning page ${page} for outfits...`;
             
-            if (!outfitsRes.ok) throw new Error("API failed to load outfits.");
+            // FIXED: Removed 'isEditable' from URL to prevent false-negatives on certain public accounts
+            const endpoint = AVATAR_API + `users/${userId}/outfits?page=${page}&itemsPerPage=50`;
+            const outfitsRes = await fetchWithRetry(endpoint);
             const outfitsData = await outfitsRes.json();
 
             if (outfitsData.data && outfitsData.data.length > 0) {
-                allOutfits = allOutfits.concat(outfitsData.data);
-                statusText.textContent = `Scanned ${allOutfits.length} custom outfits...`;
+                // FIXED: Filter out Dynamic Heads and Bundles right here in JavaScript instead of relying on the API URL
+                const cleanOutfits = outfitsData.data.filter(outfit => 
+                    outfit.outfitType === "Avatar" || outfit.outfitType === "Classic" || !outfit.outfitType
+                );
 
-                // If Roblox returns fewer than 50 outfits, we know we've reached the final page
+                allOutfits = allOutfits.concat(cleanOutfits);
+
                 if (outfitsData.data.length < 50) {
-                    isFetching = false;
+                    isFetching = false; // Reached the absolute end
                 } else {
-                    page++; // Go to the next page
+                    page++;
                 }
             } else {
-                isFetching = false; // No data returned
+                isFetching = false;
             }
         }
 
-        const outfits = allOutfits;
-
-        if (!outfits || outfits.length === 0) {
+        if (allOutfits.length === 0) {
             statusText.textContent = "No saved outfits found, or their inventory is private.";
             return;
         }
 
-        statusText.textContent = `Found a total of ${outfits.length} custom outfits. Fetching images...`;
+        statusText.textContent = `Found ${allOutfits.length} custom outfits. Downloading 2D images...`;
 
         const thumbnailMap = {};
         const chunkSize = 50; 
 
-        // 4. CHUNKING: Fetch the 2D images in batches of 50 to avoid URL length limits
-        for (let i = 0; i < outfits.length; i += chunkSize) {
-            const chunk = outfits.slice(i, i + chunkSize);
+        // Fetch images in chunks with automatic retry capabilities
+        for (let i = 0; i < allOutfits.length; i += chunkSize) {
+            const chunk = allOutfits.slice(i, i + chunkSize);
             const outfitIds = chunk.map(outfit => outfit.id).join(',');
             
             try {
-                const thumbnailsRes = await fetch(OUTFIT_THUMBNAILS_API + outfitIds);
+                const thumbnailsRes = await fetchWithRetry(OUTFIT_THUMBNAILS_API + outfitIds);
                 const thumbnailsData = await thumbnailsRes.json();
 
                 if (thumbnailsData.data) {
@@ -109,14 +127,14 @@ async function fetchOutfits(userId) {
                     });
                 }
             } catch (err) {
-                console.warn("A batch of images failed to load.", err);
+                console.warn("A chunk of thumbnails failed, skipping to preserve operation...", err);
             }
         }
 
-        statusText.textContent = `Successfully loaded all ${outfits.length} outfits.`;
+        statusText.textContent = `Successfully loaded all ${allOutfits.length} outfits!`;
 
-        // 5. Render every single outfit
-        outfits.forEach(outfit => {
+        // Render everything flawlessly
+        allOutfits.forEach(outfit => {
             const imageUrl = thumbnailMap[outfit.id];
             const outfitDiv = document.createElement('div');
             outfitDiv.className = 'outfit-card';
@@ -141,7 +159,7 @@ async function fetchOutfits(userId) {
         });
 
     } catch (error) {
-        statusText.textContent = "Failed to load outfits. Rate limit hit or inventory private.";
+        statusText.textContent = "Failed to load outfits. The proxy might be overloaded right now. Try again in a few seconds.";
         console.error(error);
     }
 }
@@ -159,7 +177,7 @@ async function fetchAccessories(outfitId, buttonElement) {
     buttonElement.textContent = "...";
 
     try {
-        const detailsRes = await fetch(AVATAR_API + `outfits/${outfitId}/details`);
+        const detailsRes = await fetchWithRetry(AVATAR_API + `outfits/${outfitId}/details`);
         const detailsData = await detailsRes.json();
 
         let assetsHtml = "<ul>";
@@ -181,7 +199,6 @@ async function fetchAccessories(outfitId, buttonElement) {
     }
 }
 
-// Generates the Lua script and copies it to the user's clipboard
 function copyAvatarScript(outfitId, buttonElement) {
     const luaCode = `-- Local Avatar Changer Script
 local Players = game:GetService("Players")
@@ -223,7 +240,7 @@ end`;
             buttonElement.style.backgroundColor = originalBg;
         }, 2000);
     }).catch(err => {
-        alert("Clipboard copy failed. Make sure you are not blocking clipboard permissions.");
+        alert("Clipboard copy failed.");
         console.error("Clipboard Error:", err);
     });
 }
