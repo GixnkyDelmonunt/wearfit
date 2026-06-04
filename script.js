@@ -198,6 +198,9 @@ local ATTACHMENTS_INFO = {
 \tHairAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.5, 0)},
 \tFaceFrontAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.3, 0.1)},
 \tFaceCenterAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.3, 0)},
+\tCenterAttachment = {ParentName = "Torso", CFrame = CFrame.new()},
+\tNeckRigAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 1, 0)},
+\tRootRigAttachment = {ParentName = "Torso", CFrame = CFrame.new()},
 \tBackAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, -0.5)},
 \tFrontAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, 0.5)},
 \tWaistAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, -0.5, 0)},
@@ -307,7 +310,7 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \t\tend
 
 \t\tfor _, item in ipairs(allItems) do
-\t\t\tif assetType == "Accessory" and item:IsA("Accoutrement") then
+\t\t\tif assetType == "Accessory" and (item:IsA("Accessory") or item:IsA("Accoutrement")) then
 \t\t\t\tattachAccessory(character, item:Clone())
 \t\t\t\tbreak
 \t\t\telseif assetType == "Shirt" and item:IsA("Shirt") then
@@ -339,9 +342,22 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \t\t\t\t\titem:Clone().Parent = head
 \t\t\t\tend
 \t\t\t\tbreak
-\t\t\telseif assetType == "Body" and item:IsA("CharacterMesh") then
-\t\t\t\t-- Do not 'break' here, as a package might have multiple meshes inside!
-\t\t\t\titem:Clone().Parent = character
+\t\t\telseif assetType == "Body" then
+\t\t\t\tif item:IsA("CharacterMesh") then
+\t\t\t\t\titem:Clone().Parent = character
+\t\t\t\telseif item:IsA("MeshPart") then
+\t\t\t\t\tlocal target = character:FindFirstChild(item.Name)
+
+\t\t\t\t\tif target and target:IsA("BasePart") then
+\t\t\t\t\t\tpcall(function()
+\t\t\t\t\t\t\ttarget.MeshId = item.MeshId
+\t\t\t\t\t\tend)
+
+\t\t\t\t\t\tpcall(function()
+\t\t\t\t\t\t\ttarget.TextureID = item.TextureID
+\t\t\t\t\t\tend)
+\t\t\t\t\tend
+\t\t\t\tend
 \t\t\tend
 \t\tend
 \tend
@@ -401,7 +417,14 @@ local function applyOutfit(outfitId)
 \tend
 
 \t-- Load Body Bundles
-\tlocal bodyParts = {"LeftArm", "RightArm", "LeftLeg", "RightLeg", "Torso"}
+\tlocal bodyParts = {
+\t\t"Head",
+\t\t"LeftArm",
+\t\t"RightArm",
+\t\t"LeftLeg",
+\t\t"RightLeg",
+\t\t"Torso"
+\t}
 \tfor _, partName in ipairs(bodyParts) do
 \t\tif description[partName] and description[partName] ~= 0 then
 \t\t\tloadAndApplyAsset(character, description[partName], "Body")
