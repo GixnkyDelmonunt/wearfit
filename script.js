@@ -1,8 +1,6 @@
 const USERS_API = "https://users.roproxy.com/v1/users/";
 const AVATAR_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/avatar?size=420x420&format=Png&isCircular=false&userIds=";
 const AVATAR_API = "https://avatar.roproxy.com/v1/";
-
-// FIXED: The correct API path is 'users/outfits' and the parameter is 'userOutfitIds'
 const OUTFIT_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/outfits?size=150x150&format=Png&isCircular=false&userOutfitIds=";
 
 async function searchPlayer() {
@@ -64,32 +62,51 @@ async function fetchOutfits(userId) {
             return;
         }
 
-        // 4. BATCH REQUEST: Extract all Outfit IDs to get their thumbnails at the exact same time
-        const outfitIds = outfits.map(outfit => outfit.id).join(',');
-        
-        // Fetch all thumbnails in one single request
-        const thumbnailsRes = await fetch(OUTFIT_THUMBNAILS_API + outfitIds);
-        const thumbnailsData = await thumbnailsRes.json();
+        statusText.textContent = `Found ${outfits.length} outfits. Fetching images...`;
 
-        // Create a dictionary/map linking Outfit ID to its Image URL for fast lookup
         const thumbnailMap = {};
-        if (thumbnailsData.data) {
-            thumbnailsData.data.forEach(thumb => {
-                thumbnailMap[thumb.targetId] = thumb.imageUrl;
-            });
+        const chunkSize = 50; // Roblox API safely handles 50 IDs per request
+
+        // 4. CHUNKING: Break outfits into groups of 50 to avoid URL limits
+        for (let i = 0; i < outfits.length; i += chunkSize) {
+            const chunk = outfits.slice(i, i + chunkSize);
+            const outfitIds = chunk.map(outfit => outfit.id).join(',');
+            
+            try {
+                const thumbnailsRes = await fetch(OUTFIT_THUMBNAILS_API + outfitIds);
+                const thumbnailsData = await thumbnailsRes.json();
+
+                if (thumbnailsData.data) {
+                    thumbnailsData.data.forEach(thumb => {
+                        // Roblox returns "Completed", "Pending", or "Error"
+                        if (thumb.state === "Completed") {
+                            thumbnailMap[thumb.targetId] = thumb.imageUrl;
+                        }
+                    });
+                }
+            } catch (err) {
+                console.warn("A batch of images failed to load.", err);
+            }
         }
 
         statusText.textContent = `Successfully loaded ${outfits.length} outfits.`;
 
         // 5. Render each outfit with its specific 2D image
         outfits.forEach(outfit => {
-            const imageUrl = thumbnailMap[outfit.id] || ''; // Fallback if image fails
+            const imageUrl = thumbnailMap[outfit.id];
             
             const outfitDiv = document.createElement('div');
             outfitDiv.className = 'outfit-card';
+            
+            // If the image is still pending on Roblox's servers, or moderated, handle it cleanly
+            let imageHtml = `<p style="color:#666; font-size:12px;">Image Pending/Moderated</p>`;
+            if (imageUrl) {
+                imageHtml = `<img class="outfit-thumbnail" src="${imageUrl}" alt="Outfit Image">`;
+            }
+
             outfitDiv.innerHTML = `
                 <h3 title="${outfit.name}">${outfit.name}</h3>
-                ${imageUrl ? `<img class="outfit-thumbnail" src="${imageUrl}" alt="Outfit Image">` : '<p style="color:#666;">No Image</p>'}
+                ${imageHtml}
                 <button onclick="fetchAccessories('${outfit.id}', this)">View Accessories</button>
                 <div id="acc-${outfit.id}" class="accessories-list"></div>
             `;
