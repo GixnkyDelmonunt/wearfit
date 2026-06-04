@@ -183,33 +183,210 @@ async function fetchAccessories(outfitId, buttonElement) {
 
 // Generates the Lua script and copies it to the user's clipboard
 function copyAvatarScript(outfitId, buttonElement) {
-    const luaCode = `-- Local Avatar Changer Script
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-
+    const luaCode = `-- Local Avatar Changer Script (Manual Motor6D Attachment)
 local targetOutfitId = ${outfitId}
 
-print("Fetching Outfit: " .. targetOutfitId)
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
 
-local success, description = pcall(function()
-    return Players:GetHumanoidDescriptionFromOutfitId(targetOutfitId)
-end)
+if _G.__AppearanceConnection then
+\t_G.__AppearanceConnection:Disconnect()
+end
 
-if success and description then
-    local applySuccess, err = pcall(function()
-        humanoid:ApplyDescription(description)
-    end)
-    
-    if applySuccess then
-        print("Avatar successfully changed locally!")
-    else
-        warn("Your executor failed to apply the description: " .. tostring(err))
-    end
-else
-    warn("Failed to load outfit. The inventory might be private.")
-end`;
+local ATTACHMENTS_INFO = {
+\tHatAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.5, 0)},
+\tHairAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.5, 0)},
+\tFaceFrontAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.3, 0.1)},
+\tFaceCenterAttachment = {ParentName = "Head", CFrame = CFrame.new(0, 0.3, 0)},
+\tBackAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, -0.5)},
+\tFrontAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, 0.5)},
+\tWaistAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, -0.5, 0)},
+\tWaistFrontAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, -0.5, 0.1)},
+\tWaistBackAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, -0.5, -0.1)},
+\tNeckAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 1, 0)},
+\tBodyBackAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, -0.5)},
+\tBodyFrontAttachment = {ParentName = "Torso", CFrame = CFrame.new(0, 0, 0.5)},
+\tLeftCollarAttachment = {ParentName = "Torso", CFrame = CFrame.new(-1, 0.5, 0)},
+\tRightCollarAttachment = {ParentName = "Torso", CFrame = CFrame.new(1, 0.5, 0)},
+\tRightGripAttachment = {ParentName = "Right Arm", CFrame = CFrame.new(0, -1, 0)},
+}
+
+local function ensureAttachment(character, name)
+\tlocal info = ATTACHMENTS_INFO[name]
+\tif not info then return end
+\tlocal part = character:FindFirstChild(info.ParentName)
+\tif not part then return end
+
+\tlocal att = part:FindFirstChild(name)
+\tif not att then
+\t\tatt = Instance.new("Attachment")
+\t\tatt.Name = name
+\t\tatt.CFrame = info.CFrame
+\t\tatt.Parent = part
+\tend
+\treturn att
+end
+
+local function attachAccessory(character, accessory)
+\tlocal handle = accessory:FindFirstChild("Handle")
+\tif not handle then return end
+
+\thandle.CanCollide = false
+\thandle.Massless = true
+
+\tfor _, child in ipairs(handle:GetChildren()) do
+\t\tif child:IsA("Weld") or child:IsA("Motor6D") then
+\t\t\tchild:Destroy()
+\t\tend
+\tend
+
+\tlocal handleAttachments = {}
+\tfor _, att in ipairs(handle:GetChildren()) do
+\t\tif att:IsA("Attachment") then
+\t\t\ttable.insert(handleAttachments, att)
+\t\tend
+\tend
+
+\tif #handleAttachments == 0 then
+\t\tlocal defaultAttachment = Instance.new("Attachment")
+\t\tdefaultAttachment.Name = "HandleAttachment"
+\t\tdefaultAttachment.CFrame = CFrame.new(0, 0, 0)
+\t\tdefaultAttachment.Parent = handle
+\t\ttable.insert(handleAttachments, defaultAttachment)
+\tend
+
+\tfor _, handleAtt in ipairs(handleAttachments) do
+\t\tlocal charAtt = ensureAttachment(character, handleAtt.Name)
+\t\tif not charAtt then continue end
+
+\t\tlocal joint = Instance.new("Motor6D")
+\t\tjoint.Name = "AccessoryMotor6D"
+\t\tjoint.Part0 = charAtt.Parent
+\t\tjoint.Part1 = handle
+\t\tjoint.C0 = charAtt.CFrame
+\t\tjoint.C1 = handleAtt.CFrame
+\t\tjoint.Parent = handle
+\tend
+
+\taccessory.Parent = character
+end
+
+local function clearAppearance(character)
+\tfor _, obj in ipairs(character:GetChildren()) do
+\t\tif obj:IsA("Accessory") or obj:IsA("Hat") or
+\t\t   obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") or
+\t\t   obj:IsA("CharacterMesh") or obj:IsA("BodyColors") then
+\t\t\tobj:Destroy()
+\t\tend
+\tend
+
+\tlocal head = character:FindFirstChild("Head")
+\tif head then
+\t\tfor _, obj in ipairs(head:GetChildren()) do
+\t\t\tif (obj:IsA("Decal") and obj.Name == "face") or obj:IsA("SpecialMesh") then
+\t\t\t\tobj:Destroy()
+\t\t\tend
+\t\tend
+\tend
+end
+
+local function loadAndApplyAsset(character, assetId, assetType)
+\tif not assetId or assetId == 0 or assetId == "" then return end
+\t
+\t-- Most standard executors use GetObjects to download assets directly
+\tlocal success, objects = pcall(function()
+\t\treturn game:GetObjects("rbxassetid://" .. tostring(assetId))
+\tend)
+\t
+\tif success and objects and objects[1] then
+\t\tlocal obj = objects[1]
+\t\t
+\t\tif obj:IsA("Accessory") or obj:IsA("Hat") then
+\t\t\tattachAccessory(character, obj)
+\t\telseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") then
+\t\t\tobj.Parent = character
+\t\telseif obj:IsA("Decal") and assetType == "Face" then
+\t\t\tlocal head = character:FindFirstChild("Head")
+\t\t\tif head then
+\t\t\t\tobj.Parent = head
+\t\t\tend
+\t\tend
+\tend
+end
+
+local function applyOutfit(outfitId)
+\tlocal character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+\t
+\tlocal success, description = pcall(function()
+\t\treturn Players:GetHumanoidDescriptionFromOutfitId(outfitId)
+\tend)
+\t
+\tif not success or not description then
+\t\twarn("Failed to fetch HumanoidDescription for outfit")
+\t\treturn
+\tend
+
+\tclearAppearance(character)
+\t
+\t-- Apply Body Colors manually
+\tlocal bc = Instance.new("BodyColors")
+\tbc.HeadColor = description.HeadColor
+\tbc.LeftArmColor = description.LeftArmColor
+\tbc.RightArmColor = description.RightArmColor
+\tbc.LeftLegColor = description.LeftLegColor
+\tbc.RightLegColor = description.RightLegColor
+\tbc.TorsoColor = description.TorsoColor
+\tbc.Parent = character
+
+\t-- Recreate Head
+\tlocal head = character:FindFirstChild("Head")
+\tif head then
+\t\tlocal mesh = Instance.new("SpecialMesh")
+\t\tmesh.MeshType = Enum.MeshType.Head
+\t\tmesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+\t\tmesh.Parent = head
+\t\t
+\t\tif description.Face == 0 then
+\t\t\tlocal defaultFace = Instance.new("Decal")
+\t\t\tdefaultFace.Name = "face"
+\t\t\tdefaultFace.Texture = "rbxasset://textures/face.png"
+\t\t\tdefaultFace.Parent = head
+\t\tend
+\tend
+
+\t-- Load standard clothing
+\tloadAndApplyAsset(character, description.Shirt, "Shirt")
+\tloadAndApplyAsset(character, description.Pants, "Pants")
+\tloadAndApplyAsset(character, description.GraphicTShirt, "ShirtGraphic")
+\tloadAndApplyAsset(character, description.Face, "Face")
+\t
+\t-- Load & attach all accessories
+\tlocal accessoryProps = {
+\t\t"HatAccessory", "HairAccessory", "FaceAccessory", "NeckAccessory",
+\t\t"ShouldersAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory"
+\t}
+\t
+\tfor _, prop in ipairs(accessoryProps) do
+\t\tlocal idsString = description[prop]
+\t\tif idsString and idsString ~= "" then
+\t\t\tfor idStr in string.gmatch(idsString, "([^,]+)") do
+\t\t\t\tlocal id = tonumber(idStr)
+\t\t\t\tif id then
+\t\t\t\t\tloadAndApplyAsset(character, id, "Accessory")
+\t\t\t\tend
+\t\t\tend
+\t\tend
+\tend
+end
+
+applyOutfit(targetOutfitId)
+
+-- Keep the outfit applied even if the player resets
+_G.__AppearanceConnection = localPlayer.CharacterAdded:Connect(function(character)
+\tcharacter:WaitForChild("Humanoid")
+\tcharacter:WaitForChild("HumanoidRootPart")
+\tapplyOutfit(targetOutfitId)
+end)`;
 
     navigator.clipboard.writeText(luaCode).then(() => {
         const originalText = buttonElement.textContent;
@@ -223,7 +400,7 @@ end`;
             buttonElement.style.backgroundColor = originalBg;
         }, 2000);
     }).catch(err => {
-        alert("Clipboard copy failed. Make sure you are not blocking clipboard permissions.");
+        alert("Clipboard copy failed.");
         console.error("Clipboard Error:", err);
     });
 }
