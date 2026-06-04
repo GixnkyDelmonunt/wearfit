@@ -293,7 +293,6 @@ end
 local function loadAndApplyAsset(character, assetId, assetType)
 \tif not assetId or assetId == 0 or assetId == "" then return end
 \t
-\t-- Most standard executors use GetObjects to download assets directly
 \tlocal success, objects = pcall(function()
 \t\treturn game:GetObjects("rbxassetid://" .. tostring(assetId))
 \tend)
@@ -328,14 +327,14 @@ local function applyOutfit(outfitId)
 
 \tclearAppearance(character)
 \t
-\t-- Apply Body Colors manually
+\t-- FIXED: Using Color3 properties instead of BrickColor properties
 \tlocal bc = Instance.new("BodyColors")
-\tbc.HeadColor = description.HeadColor
-\tbc.LeftArmColor = description.LeftArmColor
-\tbc.RightArmColor = description.RightArmColor
-\tbc.LeftLegColor = description.LeftLegColor
-\tbc.RightLegColor = description.RightLegColor
-\tbc.TorsoColor = description.TorsoColor
+\tbc.HeadColor3 = description.HeadColor
+\tbc.LeftArmColor3 = description.LeftArmColor
+\tbc.RightArmColor3 = description.RightArmColor
+\tbc.LeftLegColor3 = description.LeftLegColor
+\tbc.RightLegColor3 = description.RightLegColor
+\tbc.TorsoColor3 = description.TorsoColor
 \tbc.Parent = character
 
 \t-- Recreate Head
@@ -381,7 +380,6 @@ end
 
 applyOutfit(targetOutfitId)
 
--- Keep the outfit applied even if the player resets
 _G.__AppearanceConnection = localPlayer.CharacterAdded:Connect(function(character)
 \tcharacter:WaitForChild("Humanoid")
 \tcharacter:WaitForChild("HumanoidRootPart")
