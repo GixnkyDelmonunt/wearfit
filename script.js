@@ -183,7 +183,7 @@ async function fetchAccessories(outfitId, buttonElement) {
 
 // Generates the Lua script and copies it to the user's clipboard
 function copyAvatarScript(outfitId, buttonElement) {
-    const luaCode = `-- Local Avatar Changer Script (Manual Motor6D & Asset Extraction)
+    const luaCode = `-- Local Avatar Changer Script (Deep Asset Extraction & Motor6D)
 local targetOutfitId = ${outfitId}
 
 local Players = game:GetService("Players")
@@ -297,32 +297,51 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \tend)
 \t
 \tif success and objects then
+\t\t-- CRITICAL FIX: Extract EVERYTHING out of hidden Folders/Models
+\t\tlocal allItems = {}
 \t\tfor _, obj in ipairs(objects) do
-\t\t\t-- Using Accoutrement catches Accessories, Hats, and legacy Hair
-\t\t\tif obj:IsA("Accoutrement") then 
-\t\t\t\tattachAccessory(character, obj)
-\t\t\telseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") or obj:IsA("CharacterMesh") then
-\t\t\t\tobj.Parent = character
-\t\t\telseif assetType == "Face" then
-\t\t\t\t-- Dig through folders in case the Decal is hidden inside
-\t\t\t\tlocal decal = obj:IsA("Decal") and obj or obj:FindFirstChildWhichIsA("Decal", true)
+\t\t\ttable.insert(allItems, obj)
+\t\t\tfor _, desc in ipairs(obj:GetDescendants()) do
+\t\t\t\ttable.insert(allItems, desc)
+\t\t\tend
+\t\tend
+
+\t\tfor _, item in ipairs(allItems) do
+\t\t\tif assetType == "Accessory" and item:IsA("Accoutrement") then
+\t\t\t\tattachAccessory(character, item:Clone())
+\t\t\t\tbreak
+\t\t\telseif assetType == "Shirt" and item:IsA("Shirt") then
+\t\t\t\titem:Clone().Parent = character
+\t\t\t\tbreak
+\t\t\telseif assetType == "Pants" and item:IsA("Pants") then
+\t\t\t\titem:Clone().Parent = character
+\t\t\t\tbreak
+\t\t\telseif assetType == "ShirtGraphic" and item:IsA("ShirtGraphic") then
+\t\t\t\titem:Clone().Parent = character
+\t\t\t\tbreak
+\t\t\telseif assetType == "Face" and item:IsA("Decal") then
 \t\t\t\tlocal head = character:FindFirstChild("Head")
-\t\t\t\tif head and decal then
+\t\t\t\tif head then
 \t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
 \t\t\t\t\t\tif v:IsA("Decal") and v.Name == "face" then v:Destroy() end
 \t\t\t\t\tend
-\t\t\t\t\tdecal.Name = "face"
-\t\t\t\t\tdecal.Parent = head
+\t\t\t\t\tlocal faceClone = item:Clone()
+\t\t\t\t\tfaceClone.Name = "face"
+\t\t\t\t\tfaceClone.Parent = head
 \t\t\t\tend
-\t\t\telseif assetType == "Head" then
-\t\t\t\tlocal mesh = obj:IsA("SpecialMesh") and obj or obj:FindFirstChildWhichIsA("SpecialMesh", true)
+\t\t\t\tbreak
+\t\t\telseif assetType == "Head" and item:IsA("SpecialMesh") then
 \t\t\t\tlocal head = character:FindFirstChild("Head")
-\t\t\t\tif head and mesh then
+\t\t\t\tif head then
 \t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
 \t\t\t\t\t\tif v:IsA("SpecialMesh") then v:Destroy() end
 \t\t\t\t\tend
-\t\t\t\t\tmesh.Parent = head
+\t\t\t\t\titem:Clone().Parent = head
 \t\t\t\tend
+\t\t\t\tbreak
+\t\t\telseif assetType == "Body" and item:IsA("CharacterMesh") then
+\t\t\t\t-- Do not 'break' here, as a package might have multiple meshes inside!
+\t\t\t\titem:Clone().Parent = character
 \t\t\tend
 \t\tend
 \tend
@@ -381,7 +400,7 @@ local function applyOutfit(outfitId)
 \t\tloadAndApplyAsset(character, description.Head, "Head")
 \tend
 
-\t-- Load Body Bundles (Applies CharacterMeshes)
+\t-- Load Body Bundles
 \tlocal bodyParts = {"LeftArm", "RightArm", "LeftLeg", "RightLeg", "Torso"}
 \tfor _, partName in ipairs(bodyParts) do
 \t\tif description[partName] and description[partName] ~= 0 then
