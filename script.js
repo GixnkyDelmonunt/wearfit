@@ -16,17 +16,14 @@ async function searchPlayer() {
     outfitsContainer.innerHTML = "";
 
     try {
-        // 1. Fetch User Info
         const userRes = await fetch(USERS_API + userId);
         if (!userRes.ok) throw new Error("Player not found.");
         const userData = await userRes.json();
 
-        // 2. Fetch User Avatar Image
         const thumbRes = await fetch(AVATAR_THUMBNAILS_API + userId);
         const thumbData = await thumbRes.json();
         const avatarImageUrl = thumbData.data[0]?.imageUrl || "";
 
-        // Render Profile Card
         profileContainer.innerHTML = `
             <div class="profile-card">
                 <h2>${userData.displayName}</h2>
@@ -51,10 +48,8 @@ async function fetchOutfits(userId) {
     outfitsContainer.innerHTML = "";
 
     try {
-        // 3. Fetch list of outfits
         const outfitsRes = await fetch(AVATAR_API + `users/${userId}/outfits`);
         const outfitsData = await outfitsRes.json();
-
         const outfits = outfitsData.data;
 
         if (!outfits || outfits.length === 0) {
@@ -65,9 +60,8 @@ async function fetchOutfits(userId) {
         statusText.textContent = `Found ${outfits.length} outfits. Fetching images...`;
 
         const thumbnailMap = {};
-        const chunkSize = 50; // Roblox API safely handles 50 IDs per request
+        const chunkSize = 50; 
 
-        // 4. CHUNKING: Break outfits into groups of 50 to avoid URL limits
         for (let i = 0; i < outfits.length; i += chunkSize) {
             const chunk = outfits.slice(i, i + chunkSize);
             const outfitIds = chunk.map(outfit => outfit.id).join(',');
@@ -78,7 +72,6 @@ async function fetchOutfits(userId) {
 
                 if (thumbnailsData.data) {
                     thumbnailsData.data.forEach(thumb => {
-                        // Roblox returns "Completed", "Pending", or "Error"
                         if (thumb.state === "Completed") {
                             thumbnailMap[thumb.targetId] = thumb.imageUrl;
                         }
@@ -91,15 +84,12 @@ async function fetchOutfits(userId) {
 
         statusText.textContent = `Successfully loaded ${outfits.length} outfits.`;
 
-        // 5. Render each outfit with its specific 2D image
         outfits.forEach(outfit => {
             const imageUrl = thumbnailMap[outfit.id];
-            
             const outfitDiv = document.createElement('div');
             outfitDiv.className = 'outfit-card';
             
-            // If the image is still pending on Roblox's servers, or moderated, handle it cleanly
-            let imageHtml = `<p style="color:#666; font-size:12px;">Image Pending/Moderated</p>`;
+            let imageHtml = `<p style="color:#666; font-size:12px;">Image Pending</p>`;
             if (imageUrl) {
                 imageHtml = `<img class="outfit-thumbnail" src="${imageUrl}" alt="Outfit Image">`;
             }
@@ -107,14 +97,19 @@ async function fetchOutfits(userId) {
             outfitDiv.innerHTML = `
                 <h3 title="${outfit.name}">${outfit.name}</h3>
                 ${imageHtml}
-                <button onclick="fetchAccessories('${outfit.id}', this)">View Accessories</button>
+                
+                <div class="action-buttons">
+                    <button onclick="fetchAccessories('${outfit.id}', this)">Accessories</button>
+                    <button class="copy-btn" onclick="copyAvatarScript('${outfit.id}', this)">Use Avatar</button>
+                </div>
+
                 <div id="acc-${outfit.id}" class="accessories-list"></div>
             `;
             outfitsContainer.appendChild(outfitDiv);
         });
 
     } catch (error) {
-        statusText.textContent = "Failed to load outfits. (API Rate limit or private inventory)";
+        statusText.textContent = "Failed to load outfits.";
         console.error(error);
     }
 }
@@ -125,11 +120,11 @@ async function fetchAccessories(outfitId, buttonElement) {
     if (accContainer.innerHTML !== "") {
         const isHidden = accContainer.style.display === "none";
         accContainer.style.display = isHidden ? "block" : "none";
-        buttonElement.textContent = isHidden ? "Hide Accessories" : "View Accessories";
         return;
     }
 
-    buttonElement.textContent = "Loading...";
+    const originalText = buttonElement.textContent;
+    buttonElement.textContent = "...";
 
     try {
         const detailsRes = await fetch(AVATAR_API + `outfits/${outfitId}/details`);
@@ -141,15 +136,68 @@ async function fetchAccessories(outfitId, buttonElement) {
                 assetsHtml += `<li><strong>${asset.name}</strong> <br><span style="color:#888; font-size:12px;">ID: ${asset.id}</span></li>`;
             });
         } else {
-            assetsHtml += "<li>No accessories/assets found.</li>";
+            assetsHtml += "<li>No accessories found.</li>";
         }
         assetsHtml += "</ul>";
 
         accContainer.innerHTML = assetsHtml;
         accContainer.style.display = "block";
-        buttonElement.textContent = "Hide Accessories";
+        buttonElement.textContent = originalText;
 
     } catch (error) {
-        buttonElement.textContent = "Error loading";
+        buttonElement.textContent = "Error";
     }
+}
+
+// NEW FUNCTION: Generates the Lua script and copies it to the user's clipboard
+function copyAvatarScript(outfitId, buttonElement) {
+    // This is the raw Lua Code that will be generated
+    const luaCode = `-- Local Avatar Changer Script
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+local targetOutfitId = ${outfitId}
+
+print("Fetching Outfit: " .. targetOutfitId)
+
+local success, description = pcall(function()
+    -- Pulls the exact avatar data from Roblox servers
+    return Players:GetHumanoidDescriptionFromOutfitId(targetOutfitId)
+end)
+
+if success and description then
+    local applySuccess, err = pcall(function()
+        -- ApplyDescription wipes all current clothes/accessories and equips the new ones
+        humanoid:ApplyDescription(description)
+    end)
+    
+    if applySuccess then
+        print("Avatar successfully changed locally!")
+    else
+        warn("Your executor failed to apply the description: " .. tostring(err))
+    end
+else
+    warn("Failed to load outfit. The inventory might be private.")
+end`;
+
+    // Copy to clipboard logic
+    navigator.clipboard.writeText(luaCode).then(() => {
+        // Visual feedback
+        const originalText = buttonElement.textContent;
+        const originalBg = buttonElement.style.backgroundColor;
+        
+        buttonElement.textContent = "Copied!";
+        buttonElement.style.backgroundColor = "#10b981"; // Turn green
+        
+        // Reset button after 2 seconds
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.backgroundColor = originalBg;
+        }, 2000);
+    }).catch(err => {
+        alert("Clipboard copy failed. Make sure you are not blocking clipboard permissions.");
+        console.error("Clipboard Error:", err);
+    });
 }
