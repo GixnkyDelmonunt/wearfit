@@ -44,7 +44,7 @@ async function fetchOutfits(userId) {
     const statusText = document.getElementById('statusText');
     const outfitsContainer = document.getElementById('outfitsContainer');
     
-    statusText.textContent = "Loading outfits and generating 2D images...";
+    statusText.textContent = "Loading outfits and their images...";
     outfitsContainer.innerHTML = "";
 
     try {
@@ -53,7 +53,7 @@ async function fetchOutfits(userId) {
         const outfits = outfitsData.data;
 
         if (!outfits || outfits.length === 0) {
-            statusText.textContent = "No saved outfits found, or their inventory is private.";
+            statusText.textContent = "No saved outfits found, or maybe u got rate limited.";
             return;
         }
 
@@ -109,7 +109,7 @@ async function fetchOutfits(userId) {
         });
 
     } catch (error) {
-        statusText.textContent = "Failed to load outfits.";
+        statusText.textContent = "Failed to load outfits :(";
         console.error(error);
     }
 }
@@ -163,18 +163,17 @@ local targetOutfitId = ${outfitId}
 print("Fetching Outfit: " .. targetOutfitId)
 
 local success, description = pcall(function()
-    -- Pulls the exact avatar data from Roblox servers
+    -- jaux was here
     return Players:GetHumanoidDescriptionFromOutfitId(targetOutfitId)
 end)
 
 if success and description then
     local applySuccess, err = pcall(function()
-        -- ApplyDescription wipes all current clothes/accessories and equips the new ones
         humanoid:ApplyDescription(description)
     end)
     
     if applySuccess then
-        print("Avatar successfully changed locally!")
+        print("Avatar successfully changed")
     else
         warn("Your executor failed to apply the description: " .. tostring(err))
     end
