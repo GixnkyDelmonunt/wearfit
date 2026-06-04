@@ -1,7 +1,8 @@
-// We use RoProxy to bypass CORS restrictions that prevent normal websites from pulling Roblox API data directly.
 const USERS_API = "https://users.roproxy.com/v1/users/";
-const THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/avatar?size=420x420&format=Png&isCircular=false&userIds=";
+const AVATAR_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/users/avatar?size=420x420&format=Png&isCircular=false&userIds=";
 const AVATAR_API = "https://avatar.roproxy.com/v1/";
+// New API to fetch 2D outfit images
+const OUTFIT_THUMBNAILS_API = "https://thumbnails.roproxy.com/v1/outfits?size=150x150&format=Png&isCircular=false&outfitIds=";
 
 async function searchPlayer() {
     const userId = document.getElementById('userIdInput').value.trim();
@@ -18,11 +19,11 @@ async function searchPlayer() {
     try {
         // 1. Fetch User Info
         const userRes = await fetch(USERS_API + userId);
-        if (!userRes.ok) throw new Error("Player not found or banned heavily from API.");
+        if (!userRes.ok) throw new Error("Player not found.");
         const userData = await userRes.json();
 
         // 2. Fetch User Avatar Image
-        const thumbRes = await fetch(THUMBNAILS_API + userId);
+        const thumbRes = await fetch(AVATAR_THUMBNAILS_API + userId);
         const thumbData = await thumbRes.json();
         const avatarImageUrl = thumbData.data[0]?.imageUrl || "";
 
@@ -47,7 +48,7 @@ async function fetchOutfits(userId) {
     const statusText = document.getElementById('statusText');
     const outfitsContainer = document.getElementById('outfitsContainer');
     
-    statusText.textContent = "Loading outfits...";
+    statusText.textContent = "Loading outfits and generating 2D images...";
     outfitsContainer.innerHTML = "";
 
     try {
@@ -55,19 +56,39 @@ async function fetchOutfits(userId) {
         const outfitsRes = await fetch(AVATAR_API + `users/${userId}/outfits`);
         const outfitsData = await outfitsRes.json();
 
-        if (!outfitsData.data || outfitsData.data.length === 0) {
+        const outfits = outfitsData.data;
+
+        if (!outfits || outfits.length === 0) {
             statusText.textContent = "No saved outfits found, or their inventory is private.";
             return;
         }
 
-        statusText.textContent = `Found ${outfitsData.data.length} outfits.`;
+        // 4. BATCH REQUEST: Extract all Outfit IDs to get their thumbnails at the exact same time
+        const outfitIds = outfits.map(outfit => outfit.id).join(',');
+        
+        // Fetch all thumbnails in one single request to prevent rate limiting
+        const thumbnailsRes = await fetch(OUTFIT_THUMBNAILS_API + outfitIds);
+        const thumbnailsData = await thumbnailsRes.json();
 
-        // Render each outfit
-        outfitsData.data.forEach(outfit => {
+        // Create a dictionary/map linking Outfit ID to its Image URL for fast lookup
+        const thumbnailMap = {};
+        if (thumbnailsData.data) {
+            thumbnailsData.data.forEach(thumb => {
+                thumbnailMap[thumb.targetId] = thumb.imageUrl;
+            });
+        }
+
+        statusText.textContent = `Successfully loaded ${outfits.length} outfits.`;
+
+        // 5. Render each outfit with its specific 2D image
+        outfits.forEach(outfit => {
+            const imageUrl = thumbnailMap[outfit.id] || ''; // Fallback if image fails
+            
             const outfitDiv = document.createElement('div');
             outfitDiv.className = 'outfit-card';
             outfitDiv.innerHTML = `
-                <h3>${outfit.name}</h3>
+                <h3 title="${outfit.name}">${outfit.name}</h3>
+                ${imageUrl ? `<img class="outfit-thumbnail" src="${imageUrl}" alt="Outfit Image">` : '<p style="color:#666;">No Image</p>'}
                 <button onclick="fetchAccessories('${outfit.id}', this)">View Accessories</button>
                 <div id="acc-${outfit.id}" class="accessories-list"></div>
             `;
@@ -76,13 +97,13 @@ async function fetchOutfits(userId) {
 
     } catch (error) {
         statusText.textContent = "Failed to load outfits. (API Rate limit or private inventory)";
+        console.error(error);
     }
 }
 
 async function fetchAccessories(outfitId, buttonElement) {
     const accContainer = document.getElementById(`acc-${outfitId}`);
     
-    // Toggle visibility if already loaded
     if (accContainer.innerHTML !== "") {
         const isHidden = accContainer.style.display === "none";
         accContainer.style.display = isHidden ? "block" : "none";
@@ -93,7 +114,6 @@ async function fetchAccessories(outfitId, buttonElement) {
     buttonElement.textContent = "Loading...";
 
     try {
-        // 4. Fetch the specific details/assets of the outfit
         const detailsRes = await fetch(AVATAR_API + `outfits/${outfitId}/details`);
         const detailsData = await detailsRes.json();
 
