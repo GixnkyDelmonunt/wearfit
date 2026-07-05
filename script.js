@@ -215,13 +215,46 @@ local ATTACHMENTS_INFO = {
 }
 
 local function ensureAttachment(character, name)
+\t-- Look if the character already has this attachment somewhere first
+\tfor _, desc in ipairs(character:GetDescendants()) do
+\t\tif desc:IsA("Attachment") and desc.Name == name then
+\t\t\treturn desc
+\t\tend
+\tend
+
 \tlocal info = ATTACHMENTS_INFO[name]
-\tif not info then return end
-\tlocal part = character:FindFirstChild(info.ParentName)
+\tif not info then 
+\t\t-- Fallback for unmapped custom/new attachments
+\t\tlocal parentPartName = "Torso"
+\t\tif string.find(name:lower(), "head") or string.find(name:lower(), "hair") or string.find(name:lower(), "face") or string.find(name:lower(), "hat") then
+\t\t\tparentPartName = "Head"
+\t\tend
+\t\tlocal parentPart = character:FindFirstChild(parentPartName) or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Head")
+\t\tif parentPart then
+\t\t\tlocal att = Instance.new("Attachment")
+\t\t\tatt.Name = name
+\t\t\tatt.CFrame = CFrame.new()
+\t\t\tatt.Parent = parentPart
+\t\t\treturn att
+\t\tend
+\t\treturn nil
+\tend
+
+\tlocal partName = info.ParentName
+\tlocal part = character:FindFirstChild(partName)
+\t-- Handle R15 limb naming differences
+\tif not part and partName == "Torso" then
+\t\tpart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("LowerTorso")
+\telseif not part and partName == "Right Arm" then
+\t\tpart = character:FindFirstChild("RightHand") or character:FindFirstChild("RightUpperArm")
+\telseif not part and partName == "Left Arm" then
+\t\tpart = character:FindFirstChild("LeftHand") or character:FindFirstChild("LeftUpperArm")
+\tend
+
 \tif not part then return end
 
 \tlocal att = part:FindFirstChild(name)
-\tif not att then
+\ti\tnot att then
 \t\tatt = Instance.new("Attachment")
 \t\tatt.Name = name
 \t\tatt.CFrame = info.CFrame
@@ -238,7 +271,7 @@ local function attachAccessory(character, accessory)
 \thandle.Massless = true
 
 \tfor _, child in ipairs(handle:GetChildren()) do
-\t\tif child:IsA("Weld") or child:IsA("Motor6D") then
+\t\tif child:IsA("Weld") or child:IsA("Motor6D") or child:IsA("WeldConstraint") then
 \t\t\tchild:Destroy()
 \t\tend
 \tend
@@ -250,25 +283,34 @@ local function attachAccessory(character, accessory)
 \t\tend
 \tend
 
-\tif #handleAttachments == 0 then
-\t\tlocal defaultAttachment = Instance.new("Attachment")
-\t\tdefaultAttachment.Name = "HandleAttachment"
-\t\tdefaultAttachment.CFrame = CFrame.new(0, 0, 0)
-\t\tdefaultAttachment.Parent = handle
-\t\ttable.insert(handleAttachments, defaultAttachment)
-\tend
-
+\tlocal attached = false
 \tfor _, handleAtt in ipairs(handleAttachments) do
 \t\tlocal charAtt = ensureAttachment(character, handleAtt.Name)
-\t\tif not charAtt then continue end
+\t\tif charAtt then
+\t\t\tlocal joint = Instance.new("Weld")
+\t\t\tjoint.Name = "AccessoryWeld"
+\t\t\tjoint.Part0 = charAtt.Parent
+\t\t\tjoint.Part1 = handle
+\t\t\tjoint.C0 = charAtt.CFrame
+\t\t\tjoint.C1 = handleAtt.CFrame
+\t\t\tjoint.Parent = handle
+\t\t\tattached = true
+\t\t\tbreak -- Stop after welding first attachment to avoid physical rigging conflicts
+\t\tend
+\tend
 
-\t\tlocal joint = Instance.new("Motor6D")
-\t\tjoint.Name = "AccessoryMotor6D"
-\t\tjoint.Part0 = charAtt.Parent
-\t\tjoint.Part1 = handle
-\t\tjoint.C0 = charAtt.CFrame
-\t\tjoint.C1 = handleAtt.CFrame
-\t\tjoint.Parent = handle
+\t-- Ultimate fallback: weld to Head if absolutely no attachments matched
+\tif not attached then
+\t\tlocal head = character:FindFirstChild("Head")
+\t\tif head then
+\t\t\tlocal joint = Instance.new("Weld")
+\t\t\tjoint.Name = "AccessoryWeld"
+\t\t\tjoint.Part0 = head
+\t\t\tjoint.Part1 = handle
+\t\t\tjoint.C0 = CFrame.new(0, 0.5, 0)
+\t\t\tjoint.C1 = CFrame.new()
+\t\t\tjoint.Parent = handle
+\t\t\tend
 \tend
 
 \taccessory.Parent = character
@@ -300,7 +342,6 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \tend)
 \t
 \tif success and objects then
-\t\t-- CRITICAL FIX: Extract EVERYTHING out of hidden Folders/Models
 \t\tlocal allItems = {}
 \t\tfor _, obj in ipairs(objects) do
 \t\t\ttable.insert(allItems, obj)
@@ -333,13 +374,19 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \t\t\t\t\tfaceClone.Parent = head
 \t\t\t\tend
 \t\t\t\tbreak
-\t\t\telseif assetType == "Head" and item:IsA("SpecialMesh") then
+\t\t\telseif assetType == "Head" then
 \t\t\t\tlocal head = character:FindFirstChild("Head")
 \t\t\t\tif head then
-\t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
-\t\t\t\t\t\tif v:IsA("SpecialMesh") then v:Destroy() end
+\t\t\t\t\tif item:IsA("SpecialMesh") then
+\t\t\t\t\t\tfor _, v in ipairs(head:GetChildren()) do
+\t\t\t\t\t\t\tif v:IsA("SpecialMesh") then v:Destroy() end
+\t\t\t\t\t\tend
+\t\t\t\t\t\titem:Clone().Parent = head
+\t\t\t\t\telseif item:IsA("MeshPart") then
+\t\t\t\t\t\tpcall(function()
+\t\t\t\t\t\t\thead:ApplyMesh(item)
+\t\t\t\t\t\tend)
 \t\t\t\t\tend
-\t\t\t\t\titem:Clone().Parent = head
 \t\t\t\tend
 \t\t\t\tbreak
 \t\t\telseif assetType == "Body" then
@@ -347,15 +394,24 @@ local function loadAndApplyAsset(character, assetId, assetType)
 \t\t\t\t\titem:Clone().Parent = character
 \t\t\t\telseif item:IsA("MeshPart") then
 \t\t\t\t\tlocal target = character:FindFirstChild(item.Name)
-
 \t\t\t\t\tif target and target:IsA("BasePart") then
+\t\t\t\t\t\t-- Use ApplyMesh since directly writing to target.MeshId is write-restricted at runtime
 \t\t\t\t\t\tpcall(function()
-\t\t\t\t\t\t\ttarget.MeshId = item.MeshId
+\t\t\t\t\t\t\ttarget:ApplyMesh(item)
 \t\t\t\t\t\tend)
-
-\t\t\t\t\t\tpcall(function()
-\t\t\t\t\t\t\ttarget.TextureID = item.TextureID
-\t\t\t\t\t\tend)
+\t\t\t\t\t\t
+\t\t\t\t\t\t-- Clean up existing PBR or layered clothing attachments on target limb
+\t\t\t\t\t\tfor _, child in ipairs(target:GetChildren()) do
+\t\t\t\t\t\t\tif child:IsA("SurfaceAppearance") or child:IsA("WrapTarget") then
+\t\t\t\t\t\t\t\tchild:Destroy()
+\t\t\t\t\t\t\tend
+\t\t\t\t\t\tend
+\t\t\t\t\t\t-- Apply new PBR or layered clothing attachments
+\t\t\t\t\t\tfor _, child in ipairs(item:GetChildren()) do
+\t\t\t\t\t\t\tif child:IsA("SurfaceAppearance") or child:IsA("WrapTarget") then
+\t\t\t\t\t\t\t\tchild:Clone().Parent = target
+\t\t\t\t\t\t\tend
+\t\t\t\t\t\tend
 \t\t\t\t\tend
 \t\t\t\tend
 \t\t\tend
@@ -365,6 +421,8 @@ end
 
 local function applyOutfit(outfitId)
 \tlocal character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+\tlocal humanoid = character:FindFirstChildOfClass("Humanoid")
+\tif not humanoid then return end
 \t
 \tlocal success, description = pcall(function()
 \t\treturn Players:GetHumanoidDescriptionFromOutfitId(outfitId)
@@ -387,13 +445,16 @@ local function applyOutfit(outfitId)
 \tbc.TorsoColor3 = description.TorsoColor
 \tbc.Parent = character
 
-\t-- Recreate Default Head Mesh
+\t-- Recreate Default Head Mesh (Only if head is R6 regular part, R15 has head mesh already)
 \tlocal head = character:FindFirstChild("Head")
-\tif head then
-\t\tlocal mesh = Instance.new("SpecialMesh")
-\t\tmesh.MeshType = Enum.MeshType.Head
-\t\tmesh.Scale = Vector3.new(1.25, 1.25, 1.25)
-\t\tmesh.Parent = head
+\tif head and not head:IsA("MeshPart") then
+\t\tlocal mesh = head:FindFirstChildOfClass("SpecialMesh")
+\t\tif not mesh then
+\t\t\tmesh = Instance.new("SpecialMesh")
+\t\t\tmesh.MeshType = Enum.MeshType.Head
+\t\t\tmesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+\t\t\tmesh.Parent = head
+\t\tend
 \tend
 
 \t-- Load standard clothing
@@ -418,7 +479,6 @@ local function applyOutfit(outfitId)
 
 \t-- Load Body Bundles
 \tlocal bodyParts = {
-\t\t"Head",
 \t\t"LeftArm",
 \t\t"RightArm",
 \t\t"LeftLeg",
@@ -438,8 +498,8 @@ local function applyOutfit(outfitId)
 \t}
 \t
 \tfor _, prop in ipairs(accessoryProps) do
-\t\tlocal idsString = description[prop]
-\t\tif idsString and idsString ~= "" then
+\t\tlocal idsString = tostring(description[prop] or "")
+\t\tif idsString ~= "" then
 \t\t\tfor idStr in string.gmatch(idsString, "([^,]+)") do
 \t\t\t\tlocal id = tonumber(idStr)
 \t\t\t\tif id then
@@ -450,13 +510,18 @@ local function applyOutfit(outfitId)
 \tend
 end
 
-applyOutfit(targetOutfitId)
-
-_G.__AppearanceConnection = localPlayer.CharacterAdded:Connect(function(character)
+local function onCharacter(character)
 \tcharacter:WaitForChild("Humanoid")
 \tcharacter:WaitForChild("HumanoidRootPart")
+\ttask.wait(0.1) -- Safe breathing room for default character load
 \tapplyOutfit(targetOutfitId)
-end)`;
+end
+
+_G.__AppearanceConnection = localPlayer.CharacterAppearanceLoaded:Connect(onCharacter)
+
+if localPlayer.Character then
+\ttask.spawn(onCharacter, localPlayer.Character)
+end`;
 
     navigator.clipboard.writeText(luaCode).then(() => {
         const originalText = buttonElement.textContent;
